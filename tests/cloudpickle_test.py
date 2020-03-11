@@ -62,7 +62,7 @@ class RaiserOnPickle(object):
         raise self.exc
 
 
-def pickle_depickle(obj, protocol=cloudpickle.DEFAULT_PROTOCOL):
+def util_pickle_depickle(obj, protocol):
     """Helper function to test whether object pickled with cloudpickle can be
     depickled with pickle
     """
@@ -103,6 +103,7 @@ def test_extract_class_dict():
 class CloudPickleTest(unittest.TestCase):
 
     protocol = cloudpickle.DEFAULT_PROTOCOL
+    pickle_depickle = functools.partial(util_pickle_depickle, protocol=cloudpickle.DEFAULT_PROTOCOL)
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="tmp_cloudpickle_test_")
@@ -128,7 +129,7 @@ class CloudPickleTest(unittest.TestCase):
         my_object = MyClass()
         wr = weakref.ref(my_object)
 
-        cloudpickle.dumps(my_object)
+        cloudpickle.dumps(my_object, protocol=self.protocol)
         del my_object
         assert wr() is None, "'del'-ed my_object has not been collected"
 
@@ -136,11 +137,11 @@ class CloudPickleTest(unittest.TestCase):
         d = range(10)
         getter = itemgetter(1)
 
-        getter2 = pickle_depickle(getter, protocol=self.protocol)
+        getter2 = self.pickle_depickle(getter)
         self.assertEqual(getter(d), getter2(d))
 
         getter = itemgetter(0, 3)
-        getter2 = pickle_depickle(getter, protocol=self.protocol)
+        getter2 = self.pickle_depickle(getter)
         self.assertEqual(getter(d), getter2(d))
 
     def test_attrgetter(self):
@@ -149,18 +150,18 @@ class CloudPickleTest(unittest.TestCase):
                 return item
         d = C()
         getter = attrgetter("a")
-        getter2 = pickle_depickle(getter, protocol=self.protocol)
+        getter2 = self.pickle_depickle(getter)
         self.assertEqual(getter(d), getter2(d))
         getter = attrgetter("a", "b")
-        getter2 = pickle_depickle(getter, protocol=self.protocol)
+        getter2 = self.pickle_depickle(getter)
         self.assertEqual(getter(d), getter2(d))
 
         d.e = C()
         getter = attrgetter("e.a")
-        getter2 = pickle_depickle(getter, protocol=self.protocol)
+        getter2 = self.pickle_depickle(getter)
         self.assertEqual(getter(d), getter2(d))
         getter = attrgetter("e.a", "e.b")
-        getter2 = pickle_depickle(getter, protocol=self.protocol)
+        getter2 = self.pickle_depickle(getter)
         self.assertEqual(getter(d), getter2(d))
 
     # Regression test for SPARK-3415
@@ -184,43 +185,42 @@ class CloudPickleTest(unittest.TestCase):
             sys.exit(0)
 
         self.assertTrue("exit" in foo.__code__.co_names)
-        cloudpickle.dumps(foo)
+        cloudpickle.dumps(foo, protocol=self.protocol)
 
     def test_buffer(self):
         try:
             buffer_obj = buffer("Hello")
-            buffer_clone = pickle_depickle(buffer_obj, protocol=self.protocol)
+            buffer_clone = self.pickle_depickle(buffer_obj)
             self.assertEqual(buffer_clone, str(buffer_obj))
             buffer_obj = buffer("Hello", 2, 3)
-            buffer_clone = pickle_depickle(buffer_obj, protocol=self.protocol)
+            buffer_clone = self.pickle_depickle(buffer_obj)
             self.assertEqual(buffer_clone, str(buffer_obj))
         except NameError:  # Python 3 does no longer support buffers
             pass
 
     def test_memoryview(self):
         buffer_obj = memoryview(b"Hello")
-        self.assertEqual(pickle_depickle(buffer_obj, protocol=self.protocol),
+        self.assertEqual(self.pickle_depickle(buffer_obj),
                          buffer_obj.tobytes())
 
     def test_sliced_and_non_contiguous_memoryview(self):
         buffer_obj = memoryview(b"Hello!" * 3)[2:15:2]
-        self.assertEqual(pickle_depickle(buffer_obj, protocol=self.protocol),
+        self.assertEqual(self.pickle_depickle(buffer_obj),
                          buffer_obj.tobytes())
 
     def test_large_memoryview(self):
         buffer_obj = memoryview(b"Hello!" * int(1e7))
-        self.assertEqual(pickle_depickle(buffer_obj, protocol=self.protocol),
+        self.assertEqual(self.pickle_depickle(buffer_obj),
                          buffer_obj.tobytes())
 
     def test_lambda(self):
-        self.assertEqual(
-                pickle_depickle(lambda: 1, protocol=self.protocol)(), 1)
+        self.assertEqual(self.pickle_depickle(lambda: 1)(), 1)
 
     def test_nested_lambdas(self):
         a, b = 1, 2
         f1 = lambda x: x + a
         f2 = lambda x: f1(x) // b
-        self.assertEqual(pickle_depickle(f2, protocol=self.protocol)(1), 1)
+        self.assertEqual(self.pickle_depickle(f2)(1), 1)
 
     def test_recursive_closure(self):
         def f1():
@@ -233,10 +233,10 @@ class CloudPickleTest(unittest.TestCase):
                 return base if n <= 1 else n * g(n - 1)
             return g
 
-        g1 = pickle_depickle(f1(), protocol=self.protocol)
+        g1 = self.pickle_depickle(f1())
         self.assertEqual(g1(), g1)
 
-        g2 = pickle_depickle(f2(2), protocol=self.protocol)
+        g2 = self.pickle_depickle(f2(2))
         self.assertEqual(g2(5), 240)
 
     def test_closure_none_is_preserved(self):
@@ -249,7 +249,7 @@ class CloudPickleTest(unittest.TestCase):
             msg='f actually has closure cells!',
         )
 
-        g = pickle_depickle(f, protocol=self.protocol)
+        g = self.pickle_depickle(f)
 
         self.assertTrue(
             g.__closure__ is None,
@@ -270,7 +270,7 @@ class CloudPickleTest(unittest.TestCase):
         with pytest.raises(NameError):
             g1()
 
-        g2 = pickle_depickle(g1, protocol=self.protocol)
+        g2 = self.pickle_depickle(g1)
         with pytest.raises(NameError):
             g2()
 
@@ -283,7 +283,7 @@ class CloudPickleTest(unittest.TestCase):
 
             return g
 
-        g = pickle_depickle(f(), protocol=self.protocol)
+        g = self.pickle_depickle(f())
         self.assertEqual(g(), 2)
 
     def test_dynamically_generated_class_that_uses_super(self):
@@ -300,7 +300,7 @@ class CloudPickleTest(unittest.TestCase):
         self.assertEqual(Derived().method(), 2)
 
         # Pickle and unpickle the class.
-        UnpickledDerived = pickle_depickle(Derived, protocol=self.protocol)
+        UnpickledDerived = self.pickle_depickle(Derived)
         self.assertEqual(UnpickledDerived().method(), 2)
 
         # We have special logic for handling __doc__ because it's a readonly
@@ -309,7 +309,7 @@ class CloudPickleTest(unittest.TestCase):
 
         # Pickle and unpickle an instance.
         orig_d = Derived()
-        d = pickle_depickle(orig_d, protocol=self.protocol)
+        d = self.pickle_depickle(orig_d)
         self.assertEqual(d.method(), 2)
 
     def test_cycle_in_classdict_globals(self):
@@ -322,8 +322,8 @@ class CloudPickleTest(unittest.TestCase):
         C.C_again = C
         C.instance_of_C = C()
 
-        depickled_C = pickle_depickle(C, protocol=self.protocol)
-        depickled_instance = pickle_depickle(C())
+        depickled_C = self.pickle_depickle(C)
+        depickled_instance = self.pickle_depickle(C())
 
         # Test instance of depickled class.
         self.assertEqual(depickled_C().it_works(), "woohoo!")
@@ -340,8 +340,8 @@ class CloudPickleTest(unittest.TestCase):
             return (x + y) / LOCAL_CONSTANT
 
         # pickle the function definition
-        self.assertEqual(pickle_depickle(some_function, protocol=self.protocol)(41, 1), 1)
-        self.assertEqual(pickle_depickle(some_function, protocol=self.protocol)(81, 3), 2)
+        self.assertEqual(self.pickle_depickle(some_function)(41, 1), 1)
+        self.assertEqual(self.pickle_depickle(some_function)(81, 3), 2)
 
         hidden_constant = lambda: LOCAL_CONSTANT
 
@@ -357,29 +357,29 @@ class CloudPickleTest(unittest.TestCase):
                 return self.one() + some_function(x, 1) + self.value
 
         # pickle the class definition
-        clone_class = pickle_depickle(SomeClass, protocol=self.protocol)
+        clone_class = self.pickle_depickle(SomeClass)
         self.assertEqual(clone_class(1).one(), 1)
         self.assertEqual(clone_class(5).some_method(41), 7)
         clone_class = subprocess_pickle_echo(SomeClass, protocol=self.protocol)
         self.assertEqual(clone_class(5).some_method(41), 7)
 
         # pickle the class instances
-        self.assertEqual(pickle_depickle(SomeClass(1)).one(), 1)
-        self.assertEqual(pickle_depickle(SomeClass(5)).some_method(41), 7)
+        self.assertEqual(self.pickle_depickle(SomeClass(1)).one(), 1)
+        self.assertEqual(self.pickle_depickle(SomeClass(5)).some_method(41), 7)
         new_instance = subprocess_pickle_echo(SomeClass(5),
                                               protocol=self.protocol)
         self.assertEqual(new_instance.some_method(41), 7)
 
         # pickle the method instances
-        self.assertEqual(pickle_depickle(SomeClass(1).one)(), 1)
-        self.assertEqual(pickle_depickle(SomeClass(5).some_method)(41), 7)
+        self.assertEqual(self.pickle_depickle(SomeClass(1).one)(), 1)
+        self.assertEqual(self.pickle_depickle(SomeClass(5).some_method)(41), 7)
         new_method = subprocess_pickle_echo(SomeClass(5).some_method,
                                             protocol=self.protocol)
         self.assertEqual(new_method(41), 7)
 
     def test_partial(self):
         partial_obj = functools.partial(min, 1)
-        partial_clone = pickle_depickle(partial_obj, protocol=self.protocol)
+        partial_clone = self.pickle_depickle(partial_obj)
         self.assertEqual(partial_clone(4), 1)
 
     @pytest.mark.skipif(platform.python_implementation() == 'PyPy',
@@ -390,15 +390,13 @@ class CloudPickleTest(unittest.TestCase):
 
         if np:
             # simple ufunc: np.add
-            self.assertEqual(pickle_depickle(np.add, protocol=self.protocol),
-                             np.add)
+            self.assertEqual(self.pickle_depickle(np.add), np.add)
         else:  # skip if numpy is not available
             pass
 
         if spp:
             # custom ufunc: scipy.special.iv
-            self.assertEqual(pickle_depickle(spp.iv, protocol=self.protocol),
-                             spp.iv)
+            self.assertEqual(self.pickle_depickle(spp.iv), spp.iv)
         else:  # skip if scipy is not available
             pass
 
@@ -422,7 +420,7 @@ class CloudPickleTest(unittest.TestCase):
             for i in range(cnt):
                 yield i
 
-        gen2 = pickle_depickle(some_generator, protocol=self.protocol)
+        gen2 = self.pickle_depickle(some_generator)
 
         assert type(gen2(3)) == type(some_generator(3))
         assert list(gen2(3)) == list(range(3))
@@ -439,8 +437,8 @@ class CloudPickleTest(unittest.TestCase):
         sm = A.__dict__["test_sm"]
         cm = A.__dict__["test_cm"]
 
-        A.test_sm = pickle_depickle(sm, protocol=self.protocol)
-        A.test_cm = pickle_depickle(cm, protocol=self.protocol)
+        A.test_sm = self.pickle_depickle(sm)
+        A.test_cm = self.pickle_depickle(cm)
 
         self.assertEqual(A.test_sm(), "sm")
         self.assertEqual(A.test_cm(), "cm")
@@ -451,11 +449,11 @@ class CloudPickleTest(unittest.TestCase):
             def test_cm(cls):
                 return "cm"
 
-        A.test_cm = pickle_depickle(A.test_cm, protocol=self.protocol)
+        A.test_cm = self.pickle_depickle(A.test_cm)
         self.assertEqual(A.test_cm(), "cm")
 
     def test_method_descriptors(self):
-        f = pickle_depickle(str.upper)
+        f = self.pickle_depickle(str.upper)
         self.assertEqual(f('abc'), 'ABC')
 
     def test_instancemethods_without_self(self):
@@ -463,12 +461,12 @@ class CloudPickleTest(unittest.TestCase):
             def f(self, x):
                 return x + 1
 
-        g = pickle_depickle(F.f, protocol=self.protocol)
+        g = self.pickle_depickle(F.f)
         self.assertEqual(g.__name__, F.f.__name__)
         # self.assertEqual(g(F(), 1), 2)  # still fails
 
     def test_module(self):
-        pickle_clone = pickle_depickle(pickle, protocol=self.protocol)
+        pickle_clone = self.pickle_depickle(pickle)
         self.assertEqual(pickle, pickle_clone)
 
     def test_dynamic_module(self):
@@ -483,7 +481,7 @@ class CloudPickleTest(unittest.TestCase):
                 return f(x)
         '''
         exec(textwrap.dedent(code), mod.__dict__)
-        mod2 = pickle_depickle(mod, protocol=self.protocol)
+        mod2 = self.pickle_depickle(mod)
         self.assertEqual(mod.x, mod2.x)
         self.assertEqual(mod.f(5), mod2.f(5))
         self.assertEqual(mod.Foo().method(5), mod2.Foo().method(5))
@@ -496,14 +494,14 @@ class CloudPickleTest(unittest.TestCase):
             self.assertEqual(mod.Foo().method(5), mod3.Foo().method(5))
 
         # Test dynamic modules when imported back are singletons
-        mod1, mod2 = pickle_depickle([mod, mod])
+        mod1, mod2 = self.pickle_depickle([mod, mod])
         self.assertEqual(id(mod1), id(mod2))
 
         # Ensure proper pickling of mod's functions when module "looks" like a
         # file-backed module even though it is not:
         try:
             sys.modules['mod'] = mod
-            depickled_f = pickle_depickle(mod.f, protocol=self.protocol)
+            depickled_f = self.pickle_depickle(mod.f)
             self.assertEqual(mod.f(5), depickled_f(5))
         finally:
             sys.modules.pop('mod', None)
@@ -533,7 +531,7 @@ class CloudPickleTest(unittest.TestCase):
 
             g = make_local_function()
             with open(pickled_func_path, 'wb') as f:
-                cloudpickle.dump(g, f, protocol=self.protocol)
+                cloudpickle.dump(g, f)
 
             assert_run_python_script(textwrap.dedent(child_process_script))
 
@@ -558,7 +556,7 @@ class CloudPickleTest(unittest.TestCase):
 
         unpicklable_obj = UnpickleableObject()
         with pytest.raises(ValueError):
-            cloudpickle.dumps(unpicklable_obj)
+            cloudpickle.dumps(unpicklable_obj, protocol=self.protocol)
 
         # Emulate the behavior of scipy by injecting an unpickleable object
         # into mod's builtins.
@@ -570,7 +568,7 @@ class CloudPickleTest(unittest.TestCase):
         elif isinstance(mod.__dict__['__builtins__'], types.ModuleType):
             mod.__dict__['__builtins__'].unpickleable_obj = unpicklable_obj
 
-        depickled_mod = pickle_depickle(mod, protocol=self.protocol)
+        depickled_mod = self.pickle_depickle(mod)
         assert '__builtins__' in depickled_mod.__dict__
 
         if isinstance(depickled_mod.__dict__['__builtins__'], dict):
@@ -640,7 +638,7 @@ class CloudPickleTest(unittest.TestCase):
 
         try:
             with open(parent_process_module_file, 'wb') as fid:
-                cloudpickle.dump(mod, fid, protocol=self.protocol)
+                cloudpickle.dump(mod, fid)
 
             assert_run_python_script(textwrap.dedent(child_process_script))
 
@@ -696,23 +694,22 @@ class CloudPickleTest(unittest.TestCase):
             assert not _is_dynamic(_codecs)
 
     def test_Ellipsis(self):
-        self.assertEqual(Ellipsis,
-                         pickle_depickle(Ellipsis, protocol=self.protocol))
+        self.assertEqual(Ellipsis, self.pickle_depickle(Ellipsis))
 
     def test_NotImplemented(self):
-        ExcClone = pickle_depickle(NotImplemented, protocol=self.protocol)
+        ExcClone = self.pickle_depickle(NotImplemented)
         self.assertEqual(NotImplemented, ExcClone)
 
     def test_NoneType(self):
-        res = pickle_depickle(type(None), protocol=self.protocol)
+        res = self.pickle_depickle(type(None))
         self.assertEqual(type(None), res)
 
     def test_EllipsisType(self):
-        res = pickle_depickle(type(Ellipsis), protocol=self.protocol)
+        res = self.pickle_depickle(type(Ellipsis))
         self.assertEqual(type(Ellipsis), res)
 
     def test_NotImplementedType(self):
-        res = pickle_depickle(type(NotImplemented), protocol=self.protocol)
+        res = self.pickle_depickle(type(NotImplemented))
         self.assertEqual(type(NotImplemented), res)
 
     def test_builtin_function(self):
@@ -720,11 +717,11 @@ class CloudPickleTest(unittest.TestCase):
         # only in python2.
 
         # builtin function from the __builtin__ module
-        assert pickle_depickle(zip, protocol=self.protocol) is zip
+        assert self.pickle_depickle(zip) is zip
 
         from os import mkdir
         # builtin function from a "regular" module
-        assert pickle_depickle(mkdir, protocol=self.protocol) is mkdir
+        assert self.pickle_depickle(mkdir) is mkdir
 
     @pytest.mark.skipif(platform.python_implementation() == 'PyPy' and
                         sys.version_info[:2] == (3, 5),
@@ -736,7 +733,7 @@ class CloudPickleTest(unittest.TestCase):
 
         # pickle_depickle some builtin methods of the __builtin__ module
         for t in list, tuple, set, frozenset, dict, object:
-            cloned_new = pickle_depickle(t.__new__, protocol=self.protocol)
+            cloned_new = self.pickle_depickle(t.__new__)
             assert isinstance(cloned_new(t), t)
 
     # The next 4 tests cover all cases into which builtin python methods can
@@ -760,12 +757,9 @@ class CloudPickleTest(unittest.TestCase):
 
         assert unbound_classicmethod is clsdict_classicmethod
 
-        depickled_bound_meth = pickle_depickle(
-            bound_classicmethod, protocol=self.protocol)
-        depickled_unbound_meth = pickle_depickle(
-            unbound_classicmethod, protocol=self.protocol)
-        depickled_clsdict_meth = pickle_depickle(
-            clsdict_classicmethod, protocol=self.protocol)
+        depickled_bound_meth = self.pickle_depickle(bound_classicmethod)
+        depickled_unbound_meth = self.pickle_depickle(unbound_classicmethod)
+        depickled_clsdict_meth = self.pickle_depickle(clsdict_classicmethod)
 
         # No identity on the bound methods they are bound to different float
         # instances
@@ -782,12 +776,9 @@ class CloudPickleTest(unittest.TestCase):
         clsdict_clsmethod = type(
             obj).__dict__['fromhex']  # classmethod_descriptor
 
-        depickled_bound_meth = pickle_depickle(
-            bound_clsmethod, protocol=self.protocol)
-        depickled_unbound_meth = pickle_depickle(
-            unbound_clsmethod, protocol=self.protocol)
-        depickled_clsdict_meth = pickle_depickle(
-            clsdict_clsmethod, protocol=self.protocol)
+        depickled_bound_meth = self.pickle_depickle(bound_clsmethod)
+        depickled_unbound_meth = self.pickle_depickle(unbound_clsmethod)
+        depickled_clsdict_meth = self.pickle_depickle(clsdict_clsmethod)
 
         # float.fromhex takes a string as input.
         arg = "0x1"
@@ -819,12 +810,9 @@ class CloudPickleTest(unittest.TestCase):
         unbound_slotmethod = type(obj).__repr__  # wrapper_descriptor
         clsdict_slotmethod = type(obj).__dict__['__repr__']  # ditto
 
-        depickled_bound_meth = pickle_depickle(
-            bound_slotmethod, protocol=self.protocol)
-        depickled_unbound_meth = pickle_depickle(
-            unbound_slotmethod, protocol=self.protocol)
-        depickled_clsdict_meth = pickle_depickle(
-            clsdict_slotmethod, protocol=self.protocol)
+        depickled_bound_meth = self.pickle_depickle(bound_slotmethod)
+        depickled_unbound_meth = self.pickle_depickle(unbound_slotmethod)
+        depickled_clsdict_meth = self.pickle_depickle(clsdict_slotmethod)
 
         # No identity tests on the bound slotmethod are they are bound to
         # different float instances
@@ -844,12 +832,9 @@ class CloudPickleTest(unittest.TestCase):
 
         assert bound_staticmethod is unbound_staticmethod
 
-        depickled_bound_meth = pickle_depickle(
-            bound_staticmethod, protocol=self.protocol)
-        depickled_unbound_meth = pickle_depickle(
-            unbound_staticmethod, protocol=self.protocol)
-        depickled_clsdict_meth = pickle_depickle(
-            clsdict_staticmethod, protocol=self.protocol)
+        depickled_bound_meth = self.pickle_depickle(bound_staticmethod)
+        depickled_unbound_meth = self.pickle_depickle(unbound_staticmethod)
+        depickled_clsdict_meth = self.pickle_depickle(clsdict_staticmethod)
 
         assert depickled_bound_meth is bound_staticmethod
         assert depickled_unbound_meth is unbound_staticmethod
@@ -1008,10 +993,10 @@ class CloudPickleTest(unittest.TestCase):
 
     def check_logger(self, name):
         logger = logging.getLogger(name)
-        pickled = pickle_depickle(logger, protocol=self.protocol)
+        pickled = self.pickle_depickle(logger)
         self.assertTrue(pickled is logger, (pickled, logger))
 
-        dumped = cloudpickle.dumps(logger)
+        dumped = cloudpickle.dumps(logger, protocol=self.protocol)
 
         code = """if 1:
             import base64, cloudpickle, logging
@@ -1036,7 +1021,7 @@ class CloudPickleTest(unittest.TestCase):
 
     def test_getset_descriptor(self):
         assert isinstance(float.real, types.GetSetDescriptorType)
-        depickled_descriptor = pickle_depickle(float.real)
+        depickled_descriptor = self.pickle_depickle(float.real)
         self.assertIs(depickled_descriptor, float.real)
 
     def test_abc_cache_not_pickled(self):
@@ -1056,7 +1041,7 @@ class CloudPickleTest(unittest.TestCase):
         assert not issubclass(MyUnrelatedClass, MyClass)
         assert issubclass(MyRelatedClass, MyClass)
 
-        s = cloudpickle.dumps(MyClass)
+        s = cloudpickle.dumps(MyClass, protocol=self.protocol)
 
         assert b"MyUnrelatedClass" not in s
         assert b"MyRelatedClass" in s
@@ -1083,10 +1068,9 @@ class CloudPickleTest(unittest.TestCase):
         # the unpickled class also register tuple.
         AbstractClass.register(tuple)
 
-        depickled_base = pickle_depickle(AbstractClass, protocol=self.protocol)
-        depickled_class = pickle_depickle(ConcreteClass,
-                                          protocol=self.protocol)
-        depickled_instance = pickle_depickle(ConcreteClass())
+        depickled_base = self.pickle_depickle(AbstractClass)
+        depickled_class = self.pickle_depickle(ConcreteClass)
+        depickled_instance = self.pickle_depickle(ConcreteClass())
 
         assert issubclass(tuple, AbstractClass)
         assert issubclass(tuple, depickled_base)
@@ -1114,7 +1098,7 @@ class CloudPickleTest(unittest.TestCase):
         obj1, obj2, obj3 = SomeClass(1), SomeClass(2), SomeClass(3)
 
         things = [weakref.WeakSet([obj1, obj2]), obj1, obj2, obj3]
-        result = pickle_depickle(things, protocol=self.protocol)
+        result = self.pickle_depickle(things)
 
         weakset, depickled1, depickled2, depickled3 = result
 
@@ -1168,7 +1152,7 @@ class CloudPickleTest(unittest.TestCase):
             assert func_module_name != 'NonModuleObject'
             assert func_module_name is None
 
-            depickled_func = pickle_depickle(func, protocol=self.protocol)
+            depickled_func = self.pickle_depickle(func)
             assert depickled_func(2) == 4
 
         finally:
@@ -1206,10 +1190,10 @@ class CloudPickleTest(unittest.TestCase):
 
                 try:
                     # Test whichmodule in save_global.
-                    self.assertEqual(pickle_depickle(Foo()).foo(), "it works!")
+                    self.assertEqual(self.pickle_depickle(Foo()).foo(), "it works!")
 
                     # Test whichmodule in save_function.
-                    cloned = pickle_depickle(foo, protocol=self.protocol)
+                    cloned = self.pickle_depickle(foo)
                     self.assertEqual(cloned(), "it works!")
                 finally:
                     sys.modules.pop("_faulty_module", None)
@@ -1239,7 +1223,7 @@ class CloudPickleTest(unittest.TestCase):
 
     def test_function_module_name(self):
         func = lambda x: x
-        cloned = pickle_depickle(func, protocol=self.protocol)
+        cloned = self.pickle_depickle(func)
         self.assertEqual(cloned.__module__, func.__module__)
 
     def test_function_qualname(self):
@@ -1247,12 +1231,12 @@ class CloudPickleTest(unittest.TestCase):
             return x
         # Default __qualname__ attribute (Python 3 only)
         if hasattr(func, '__qualname__'):
-            cloned = pickle_depickle(func, protocol=self.protocol)
+            cloned = self.pickle_depickle(func)
             self.assertEqual(cloned.__qualname__, func.__qualname__)
 
         # Mutated __qualname__ attribute
         func.__qualname__ = '<modifiedlambda>'
-        cloned = pickle_depickle(func, protocol=self.protocol)
+        cloned = self.pickle_depickle(func)
         self.assertEqual(cloned.__qualname__, func.__qualname__)
 
     def test_property(self):
@@ -1286,7 +1270,7 @@ class CloudPickleTest(unittest.TestCase):
             my_object.read_only_value = 2
         my_object.read_write_value = 2
 
-        depickled_obj = pickle_depickle(my_object)
+        depickled_obj = self.pickle_depickle(my_object)
 
         assert depickled_obj.read_only_value == 1
         assert depickled_obj.read_write_value == 2
@@ -1306,8 +1290,8 @@ class CloudPickleTest(unittest.TestCase):
         t1 = MyTuple(1, 2, 3)
         t2 = MyTuple(3, 2, 1)
 
-        depickled_t1, depickled_MyTuple, depickled_t2 = pickle_depickle(
-            [t1, MyTuple, t2], protocol=self.protocol)
+        depickled_t1, depickled_MyTuple, depickled_t2 = self.pickle_depickle(
+            [t1, MyTuple, t2])
 
         assert isinstance(depickled_t1, MyTuple)
         assert depickled_t1 == t1
@@ -1454,8 +1438,7 @@ class CloudPickleTest(unittest.TestCase):
                 return _TEST_GLOBAL_VARIABLE
 
             # pickle f0 and f1 inside the same pickle_string
-            cloned_f0, cloned_f1 = pickle_depickle([f0, f1],
-                                                   protocol=self.protocol)
+            cloned_f0, cloned_f1 = self.pickle_depickle([f0, f1])
 
             # cloned_f0 and cloned_f1 now share a global namespace that is
             # isolated from any previously existing namespace
@@ -1737,7 +1720,7 @@ class CloudPickleTest(unittest.TestCase):
 
     def test_unhashable_function(self):
         d = {'a': 1}
-        depickled_method = pickle_depickle(d.get, protocol=self.protocol)
+        depickled_method = self.pickle_depickle(d.get)
         self.assertEqual(depickled_method('a'), 1)
         self.assertEqual(depickled_method('b'), None)
 
@@ -1748,7 +1731,7 @@ class CloudPickleTest(unittest.TestCase):
         next(counter)
         next(counter)
 
-        new_counter = pickle_depickle(counter, protocol=self.protocol)
+        new_counter = self.pickle_depickle(counter)
 
         self.assertTrue(counter is not new_counter)
 
@@ -1765,7 +1748,7 @@ class CloudPickleTest(unittest.TestCase):
         def g():
             f()
 
-        f2 = pickle_depickle(g, protocol=self.protocol)
+        f2 = self.pickle_depickle(g)
 
         self.assertEqual(f2.__name__, f.__name__)
 
@@ -1780,7 +1763,7 @@ class CloudPickleTest(unittest.TestCase):
         def g():
             f()
 
-        f2 = pickle_depickle(g, protocol=self.protocol)
+        f2 = self.pickle_depickle(g)
 
         self.assertEqual(f2.__doc__, f.__doc__)
 
@@ -1797,7 +1780,7 @@ class CloudPickleTest(unittest.TestCase):
         def g(x):
             f(x)
 
-        f2 = pickle_depickle(g, protocol=self.protocol)
+        f2 = self.pickle_depickle(g)
 
         self.assertEqual(f2.__annotations__, f.__annotations__)
 
@@ -1819,9 +1802,9 @@ class CloudPickleTest(unittest.TestCase):
             return a
 
         with pytest.raises(Exception):
-            cloudpickle.dumps(f.__annotations__)
+            cloudpickle.dumps(f.__annotations__, protocol=self.protocol)
 
-        depickled_f = pickle_depickle(f, protocol=self.protocol)
+        depickled_f = self.pickle_depickle(f)
         assert depickled_f.__annotations__ == {}
 
     @unittest.skipIf(sys.version_info >= (3, 7) or sys.version_info < (3, 6),
@@ -1849,7 +1832,7 @@ class CloudPickleTest(unittest.TestCase):
             a: unpickleable_annotation
 
         try:
-            cloudpickle.dumps(A.__annotations__)
+            cloudpickle.dumps(A.__annotations__, protocol={protocol})
         except Exception:
             pass
         else:
@@ -1875,7 +1858,7 @@ class CloudPickleTest(unittest.TestCase):
         # Try to pickle compound typing constructs. This would typically fail
         # on Python < 3.7 (See #193)
         t = typing.Union[list, int]
-        assert pickle_depickle(t) == t
+        assert self.pickle_depickle(t) == t
 
     def test_instance_with_slots(self):
         for slots in [["registered_attribute"], "registered_attribute"]:
@@ -1886,8 +1869,7 @@ class CloudPickleTest(unittest.TestCase):
                     self.registered_attribute = 42
 
             initial_obj = ClassWithSlots()
-            depickled_obj = pickle_depickle(
-                initial_obj, protocol=self.protocol)
+            depickled_obj = self.pickle_depickle(initial_obj)
 
             for obj in [initial_obj, depickled_obj]:
                 self.assertEqual(obj.registered_attribute, 42)
@@ -1909,7 +1891,7 @@ class CloudPickleTest(unittest.TestCase):
                      "Old versions of Python do not have this type.")
     def test_mappingproxy(self):
         mp = types.MappingProxyType({"some_key": "some value"})
-        assert mp == pickle_depickle(mp, protocol=self.protocol)
+        assert mp == self.pickle_depickle(mp)
 
     def test_dataclass(self):
         dataclasses = pytest.importorskip("dataclasses")
@@ -1917,8 +1899,8 @@ class CloudPickleTest(unittest.TestCase):
         DataClass = dataclasses.make_dataclass('DataClass', [('x', int)])
         data = DataClass(x=42)
 
-        pickle_depickle(DataClass, protocol=self.protocol)
-        assert data.x == pickle_depickle(data, protocol=self.protocol).x == 42
+        self.pickle_depickle(DataClass)
+        assert data.x == self.pickle_depickle(data).x == 42
 
     def test_locally_defined_enum(self):
         class StringEnum(str, enum.Enum):
@@ -1933,8 +1915,8 @@ class CloudPickleTest(unittest.TestCase):
             def is_green(self):
                 return self is Color.GREEN
 
-        green1, green2, ClonedColor = pickle_depickle(
-            [Color.GREEN, Color.GREEN, Color], protocol=self.protocol)
+        green1, green2, ClonedColor = self.pickle_depickle(
+            [Color.GREEN, Color.GREEN, Color])
         assert green1 is green2
         assert green1 is ClonedColor.GREEN
         assert green1 is not ClonedColor.BLUE
@@ -1946,16 +1928,15 @@ class CloudPickleTest(unittest.TestCase):
         assert green1 is Color.GREEN
         assert ClonedColor is Color
 
-        green3 = pickle_depickle(Color.GREEN, protocol=self.protocol)
+        green3 = self.pickle_depickle(Color.GREEN)
         assert green3 is Color.GREEN
 
     def test_locally_defined_intenum(self):
         # Try again with a IntEnum defined with the functional API
         DynamicColor = enum.IntEnum("Color", {"RED": 1, "GREEN": 2, "BLUE": 3})
 
-        green1, green2, ClonedDynamicColor = pickle_depickle(
-            [DynamicColor.GREEN, DynamicColor.GREEN, DynamicColor],
-            protocol=self.protocol)
+        green1, green2, ClonedDynamicColor = self.pickle_depickle(
+            [DynamicColor.GREEN, DynamicColor.GREEN, DynamicColor])
 
         assert green1 is green2
         assert green1 is ClonedDynamicColor.GREEN
@@ -2019,7 +2000,7 @@ class CloudPickleTest(unittest.TestCase):
             assert func() == "hello from a {}!".format(source)
 
             # Make sure relative imports still work after round-tripping
-            cloned_func = pickle_depickle(func, protocol=self.protocol)
+            cloned_func = self.pickle_depickle(func)
             assert cloned_func() == "hello from a {}!".format(source)
 
     def test_interactively_defined_func_with_keyword_only_argument(self):
@@ -2027,7 +2008,7 @@ class CloudPickleTest(unittest.TestCase):
         def f(a, *, b=1):
             return a + b
 
-        depickled_f = pickle_depickle(f, protocol=self.protocol)
+        depickled_f = self.pickle_depickle(f)
 
         for func in (f, depickled_f):
             assert func(2) == 3
@@ -2064,8 +2045,7 @@ class CloudPickleTest(unittest.TestCase):
         # string, meaning "save by attribute using save_global"
         from .mypkg import some_singleton
         assert some_singleton.__reduce__() == "some_singleton"
-        depickled_singleton = pickle_depickle(
-            some_singleton, protocol=self.protocol)
+        depickled_singleton = self.pickle_depickle(some_singleton)
         assert depickled_singleton is some_singleton
 
     def test_cloudpickle_extract_nested_globals(self):
@@ -2079,8 +2059,7 @@ class CloudPickleTest(unittest.TestCase):
             function_factory.__code__)
         assert globals_ == {'_TEST_GLOBAL_VARIABLE'}
 
-        depickled_factory = pickle_depickle(function_factory,
-                                            protocol=self.protocol)
+        depickled_factory = self.pickle_depickle(function_factory)
         inner_func = depickled_factory()
         assert inner_func() == _TEST_GLOBAL_VARIABLE
 
@@ -2091,7 +2070,7 @@ class CloudPickleTest(unittest.TestCase):
 
         a = A()
         with pytest.raises(pickle.PicklingError, match='recursion'):
-            cloudpickle.dumps(a)
+            cloudpickle.dumps(a, protocol=self.protocol)
 
     def test_out_of_band_buffers(self):
         if self.protocol < 5:
@@ -2103,7 +2082,7 @@ class CloudPickleTest(unittest.TestCase):
 
         data_instance = LocallyDefinedClass()
         buffers = []
-        pickle_bytes = cloudpickle.dumps(data_instance, protocol=self.protocol,
+        pickle_bytes = cloudpickle.dumps(data_instance,
                                          buffer_callback=buffers.append)
         assert len(buffers) == 1
         reconstructed = pickle.loads(pickle_bytes, buffers=buffers)
@@ -2111,7 +2090,7 @@ class CloudPickleTest(unittest.TestCase):
 
     def test_pickle_dynamic_typevar(self):
         T = typing.TypeVar('T')
-        depickled_T = pickle_depickle(T, protocol=self.protocol)
+        depickled_T = self.pickle_depickle(T)
         attr_list = [
             "__name__", "__bound__", "__constraints__", "__covariant__",
             "__contravariant__"
@@ -2121,17 +2100,27 @@ class CloudPickleTest(unittest.TestCase):
 
     def test_pickle_importable_typevar(self):
         from .mypkg import T
-        T1 = pickle_depickle(T, protocol=self.protocol)
+        T1 = self.pickle_depickle(T)
         assert T1 is T
 
         # Standard Library TypeVar
         from typing import AnyStr
-        assert AnyStr is pickle_depickle(AnyStr, protocol=self.protocol)
+        assert AnyStr is self.pickle_depickle(AnyStr)
 
 
 class Protocol2CloudPickleTest(CloudPickleTest):
 
     protocol = 2
+    pickle_depickle = functools.partial(util_pickle_depickle, protocol=2)
+
+
+class SubprocessCloudPickleTest(CloudPickleTest):
+
+    protocol = cloudpickle.DEFAULT_PROTOCOL
+    pickle_depickle = functools.partial(subprocess_pickle_echo, protocol=cloudpickle.DEFAULT_PROTOCOL)
+
+    def test_large_memoryview(self):
+        raise pytest.skip("Takes a long time")
 
 
 def test_lookup_module_and_qualname_dynamic_typevar():

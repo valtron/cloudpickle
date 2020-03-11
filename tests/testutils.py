@@ -37,7 +37,7 @@ def _make_cwd_env():
     return cloudpickle_repo_folder, env
 
 
-def subprocess_pickle_echo(input_data, protocol=None, timeout=TIMEOUT):
+def subprocess_pickle_echo(input_data, protocol, timeout=TIMEOUT):
     """Echo function with a child Python process
 
     Pickle the input data into a buffer, send it to a subprocess via
